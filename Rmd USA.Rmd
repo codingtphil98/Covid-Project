@@ -1,0 +1,112 @@
+---
+title: "USA - first part of EDA"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Key variables within the dataset  
+
+* iso3c - Country name 
+* date
+* confirmed - accumulated confirmed cases (reported by JHU CSSE) / ecdc_cases (by ECDC) 
+* deaths - accumulated deaths as reported (reported by JHU CSSE) / ecdc_deaths (by ECDC)
+* soc_dist
+* mov_rest
+* pub_health
+* lockdown
+* gov_soc_econ
+* gcmr_retail_recreation
+* gcmr_grocery_pharmacy
+* gcmr_workplaces
+
+
+
+### Import data
+```{r, echo = FALSE} 
+library(rio)
+covid_data <- import('tidycovid19.csv', setclass = 'tibble')
+covid_data$V1 <- NULL
+```
+
+### Format region names to avoid uneccessary space at end
+```{r, echo = FALSE, message = FALSE}
+library(plyr)
+# levels(covid_data$region)
+covid_data$region <- mapvalues(covid_data$region, from = c("Latin America & Caribbean ", "Sub-Saharan Africa "), to = c("Latin America & Caribbean", "Sub-Saharan Africa"))
+```
+
+### Create daily cases and deaths columns using accumulated cases and deaths
+```{r, echo = FALSE, message=FALSE}
+firstdiff <- function(x) {
+  shifted <- c(0,x[1:(length(x)-1)])
+  result = x-shifted
+  which_negative = which(result<0)
+  result[which_negative] = NA
+  return(result)
+}
+
+covid_data <- mutate(covid_data, daily_confirmed = firstdiff(confirmed))
+covid_data <- mutate(covid_data, daily_deaths = firstdiff(deaths))
+```
+
+### Only consider relevant regions: Americas, EU
+```{r, echo = FALSE, message = FALSE}
+library(dplyr)
+X <- filter(covid_data, region %in% c("Europe & Central Asia", "Latin America & Caribbean", "North America"))
+```
+
+
+# First consider USA
+
+This is a key market, and it is easier to consider as it is just one country
+
+In this report, we will assume that the daily death rate is linearly proportional to the number of new infections, with a delay of 2-3 weeks between changes in new infections and changes in death rates. We do not assume that confirmed cases is linearly proportional to the number of new infections, because the increased testing capabilities have lead to an increase in the percentage of total new infections being detected and confirmed. Therefore, we judge the effectiveness of government intervention by its impact on deaths rather than confirmed cases.
+
+```{r, echo = FALSE}
+USA <- filter(X, country == 'United States')
+```
+
+
+### Background plots for USA
+```{r, echo = FALSE}
+library(ggplot2)
+ggplot(USA, aes(x=date, y=daily_confirmed))+geom_line() + scale_x_date(date_breaks = "months", date_labels = "%b-%y") + geom_vline(xintercept = as.numeric(as.Date("2020-04-13")))
+ggplot(USA, aes(x=date, y=daily_deaths))+geom_line() + scale_x_date(date_breaks = "months", date_labels = "%b-%y") + geom_vline(xintercept = as.numeric(as.Date("2020-04-13")))
+ggplot(USA, aes(x=date, y=pub_health)) + geom_line() + scale_x_date(date_breaks = "months", date_labels = "%b-%y") + geom_vline(xintercept = as.numeric(as.Date("2020-04-13")))
+```
+
+We have marked on a line for the date 13th April 2020. This line divides the phase of rising cases in the first wave, and falling cases in the first wave.
+
+Note that the USA has seen two waves of the virus, and the public health measures have been steadily and consistently increasing, ever since the beginning of the pandemic.  
+On 2020-03-14 the government started to steeply raise the public health measures, and over the course of a month, the change in the R rate was reflected in the data as the daily death rate started to decline.
+
+
+### Split first and second phase
+
+```{r, echo = FALSE}
+USA_phase1 <- filter(USA, date < "2020-04-13")
+USA_phase2 <- filter(USA, date >= "2020-04-13")
+```
+
+### Plot relationship between increased restrictions and frequency that people visit places of retail and recreation
+
+```{r, echo = FALSE}
+ggplot(USA_phase1, aes(x=pub_health, y=gcmr_retail_recreation)) + geom_line() + labs(title='Phase 1')
+ggplot(USA_phase2, aes(x=pub_health, y=gcmr_retail_recreation)) + geom_line() + labs(title='Phase 2')
+
+
+ggplot(USA_phase1, aes(x=pub_health, y=gcmr_workplaces)) + geom_line() + labs(title='Phase 1')
+ggplot(USA_phase2, aes(x=pub_health, y=gcmr_workplaces)) + geom_line() + labs(title='Phase 2')
+
+
+ggplot(USA_phase1, aes(x=pub_health, y=gcmr_grocery_pharmacy)) + geom_line() + labs(title='Phase 1')
+ggplot(USA_phase2, aes(x=pub_health, y=gcmr_grocery_pharmacy)) + geom_line() + labs(title='Phase 2')
+```
+
+We can see that in phase 1 there was an initial increase above baseline levels in retail and recreation activity. This could be due to the stockpiling that occurred at the beginning of the pandemic.  Levels of retail and recreation dropped to less than 40% of baseline levels by the end of phase 1.  
+
+During phase 2, retail and recreational activity steadily climbed before plateuaing around 15% below the baseline.
+

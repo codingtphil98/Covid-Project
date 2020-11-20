@@ -1,0 +1,240 @@
+---
+title: "Team Project"
+author: '1704845'
+date: "19/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, echo = FALSE, warning=FALSE, message = FALSE}
+library(dplyr)
+library (readr)
+library(rio)
+library(lubridate)
+library(ggplot2)
+library(tidyverse)
+setwd("C:/Users/Tommy/OneDrive/Tommy/Team Project")
+```
+
+
+## Looking at the outbreak across EU, NA, SA
+
+
+Data source: https://github.com/OxCGRT/covid-policy-tracker  
+Also moodle provided continent-country data
+```{r LoadData, echo = FALSE, warning=FALSE, message = FALSE}
+urlfile="https://raw.githubusercontent.com/OxCGRT/covid-policy-tracker/master/data/OxCGRT_latest.csv"
+
+mydata<-read_csv(url(urlfile), col_types = cols(
+  .default = col_double(),
+  CountryName = col_character(),
+  CountryCode = col_character(),
+  RegionName = col_character(),
+  RegionCode = col_character(),
+  M1_Wildcard = col_character()
+))
+```
+
+```{r Preprocess1, echo = FALSE, warning=FALSE, message = FALSE}
+mydata$StayHome <- mydata$C6_Flag * mydata$`C6_Stay at home requirements`
+mydata <- relocate(mydata, StayHome, .after=C6_Flag)
+
+MyData <- dplyr::select(mydata, CountryName, RegionName, Date, ConfirmedCases, ConfirmedDeaths, StringencyIndexForDisplay, EconomicSupportIndexForDisplay, StayHome)
+MyData$StayHome[is.na(MyData$StayHome)] <- 0
+
+firstdiff <- function(x) {
+  shifted <- c(0,x[1:(length(x)-1)])
+  result = x-shifted
+  which_negative = which(result<0)
+  result[which_negative] = NA
+  return(result)
+}
+
+MyData <- MyData %>%
+  mutate(ConfirmedCases = firstdiff(ConfirmedCases), ConfirmedDeaths = firstdiff(ConfirmedDeaths))
+
+MyData <- MyData %>% 
+  mutate(Country = factor(CountryName), Region = factor(RegionName), Date = as_date(as.character(Date)), CountryName = NULL, RegionName = NULL) %>%
+  relocate(c(Country, Region), .before = Date)
+```
+
+```{r AddContinent, echo = FALSE, warning=FALSE}
+Countries <- import("./Datasets/Countries/Countries.xlsx", setclass = "tibble")
+colnames(Countries) <- c('Continent', 'Country')
+Countries <- filter(Countries, Country %in% MyData$Country)
+
+# Join the data frames and implement categorical data as factors
+MyData <- left_join(MyData, Countries, by = "Country")
+MyData <- MyData %>% mutate(Continent = factor(Continent)) %>%
+  relocate(Continent) %>%
+  tidyr::drop_na(Continent) %>% # drops data from 11.4% of the countries in the world. However, these are most likely small countries and therefore not important to the business
+  filter(Continent %in% c('Europe', 'North America', 'South America'))
+```
+
+```{r Preprocess2, echo = FALSE, warning=FALSE, message = FALSE}
+ContinentData <- MyData %>%
+  group_by(Date, Continent) %>%
+  dplyr::summarize(ConfirmedCases = sum(ConfirmedCases, na.rm=TRUE), ConfirmedDeaths = sum(ConfirmedDeaths, na.rm=TRUE), StringencyIndexForDisplay = mean(StringencyIndexForDisplay, na.rm=TRUE), 
+                   EconomicSupportIndexForDisplay = mean(EconomicSupportIndexForDisplay, na.rm=TRUE), StayHome = mean(StayHome)) %>%
+  mutate(across(c(StringencyIndexForDisplay, EconomicSupportIndexForDisplay, StayHome), round, 3))
+```
+
+
+```{r Plot, fig.height= 6, fig.width=10, echo = FALSE, message = FALSE, warning=FALSE}
+plot_ContinentalCases <- ggplot(ContinentData, aes(x=Date, y=ConfirmedCases, col=Continent)) + geom_point(size=0.8) + labs(title='Daily Infection Rate') + theme(legend.position = "none") 
+
+plot_ContinentalDeaths <- ggplot(ContinentData, aes(x=Date, y=ConfirmedDeaths, col=Continent)) + geom_point(size=0.8) + labs(title='Daily Death Rate')
+
+plot_ContinentalStringency <- ggplot(ContinentData, aes(x=Date, y=StringencyIndexForDisplay, col=Continent)) + geom_point(size=0.7) + labs(title='Stringency of Restrictions') +
+  xlim(as_date("2020-01-01"), as_date("2020-11-01")) + theme(legend.position = "none") 
+
+plot_ContinentalStayHome <- ggplot(ContinentData, aes(x=Date, y=StayHome, col=Continent)) + geom_point(size=0.7) +
+  labs(title='Stay at Home Restrictions', caption='Average for continent - 3:Full stay at home, 2: Stay for non-essential, 1:Recommended, 0:Nothing')
+
+library(cowplot)
+plot_grid(plot_ContinentalCases, plot_ContinentalDeaths, plot_ContinentalStringency, plot_ContinentalStayHome, ncol=2, rel_widths = c(43,57))
+```
+
+
+## Now lets look at UK specific data
+
+```{r, echo = FALSE, warning=FALSE, message = FALSE}
+UK <- mydata %>% filter(CountryName =='United Kingdom' & is.na(RegionName)) %>% 
+  select(Date, StayHome, StringencyIndexForDisplay, ConfirmedCases, ConfirmedDeaths)
+
+UK$Date <- as_date(as.character(UK$Date))
+
+UK <- UK %>%
+  mutate(ConfirmedCases = firstdiff(ConfirmedCases), ConfirmedDeaths = firstdiff(ConfirmedDeaths))
+```
+
+```{r, echo = FALSE, warning=FALSE, message = FALSE}
+plot_UKStayHome <- ggplot(UK, aes(x=Date, y=StayHome)) + geom_point(size=0.8) + xlim(as_date("2020-01-01"), as_date("2020-11-01")) +
+  labs(title='Stay at Home Restrictions')
+plot_UKStringency <- ggplot(UK, aes(x=Date, y=StringencyIndexForDisplay)) + geom_point(size=0.8) + xlim(as_date("2020-01-01"), as_date("2020-11-01")) + labs(title='Stringency of Restrictions')
+plot_UKDeaths <- ggplot(UK, aes(x=Date, y=ConfirmedDeaths)) + geom_point(size=0.8) + xlim(as_date("2020-01-01"), as_date("2020-11-01")) + labs(title='Daily Death Rate')
+plot_UKCases <- ggplot(UK, aes(x=Date, y=ConfirmedCases)) + geom_point(size=0.8) + xlim(as_date("2020-01-01"), as_date("2020-11-01")) + labs(title='Daily Infection Rate')
+```
+
+```{r, echo = FALSE, warning=FALSE, message = FALSE}
+plot_grid(plot_UKCases, plot_UKDeaths, plot_UKStringency, plot_UKStayHome)
+```
+
+
+
+
+
+# UK percentage of retail sales online
+
+```{r preprocessUK, echo = FALSE, warning=FALSE, message = FALSE}
+UK_pc_online_retail <- read_csv('./Datasets/UK retail sales/gbonlinesalespercentageofretail.csv')
+UK_pc_online_retail$Title <- seq(as.Date("2006-12-01"), as.Date("2020-10-01"), by="months")
+colnames(UK_pc_online_retail) <- c('Date', 'Internet_sales_pc')
+
+plot_UKOnlineRetialPc <- ggplot(UK_pc_online_retail, aes(x=Date, y=Internet_sales_pc)) + geom_point() + geom_line() + 
+  xlim(as_date("2015-01-01"), as_date("2020-11-01")) + labs(title='Percentage of UK retail sales conducted online since 2015')
+
+plot_UKOnlineRetialPc
+```
+
+## Dataset 2 - All online UK retail sales value indexed at 100 on 1st Jan 2019
+
+```{r, echo = FALSE, warning=FALSE, message = FALSE}
+dataset2 <- read_csv('./Datasets/UK retail sales/dataset2.csv')
+dataset2$Date <- seq(as.Date("2015-02-01"), as.Date("2020-10-01"), by="months")
+dataset2 <- dataset2 %>% select(Date, Retail_ex_fuel =  `All retailing excluding automotive fuel`, Food_stores = `Predominantly food stores`, 
+                                Textile_clothing_footwear = `Textile, clothing and footwear stores`, Household_goods = `Household goods stores`)
+# Indexing columns to start at 100
+startdate = which(dataset2$Date == "2019-01-01")
+for(i in 2:5){
+  dataset2[,i] <- round(dataset2[,i] / pull(dataset2[startdate,i]) * 100,2)
+}
+
+dataset2 <- pivot_longer(dataset2, 2:5, names_to='RetailType', values_to='OnlineSales')
+## Plotting
+plot_UKOnlineRetail <- ggplot(dataset2, aes(x=Date, y=OnlineSales, col=RetailType)) + geom_point() + geom_line() + xlim(as_date("2019-01-01"), as_date("2020-11-01")) +
+  labs(title='Change in UK Monthly Online Retail Sales since 2019', caption='Normalised for seasonal change, Retail ex fuel should be in black')
+
+```
+
+
+
+
+
+## Dataset 4 - All retail sales UK value indexed at 100 on 1st Jan 2019
+
+```{r, echo = FALSE, warning=FALSE, message = FALSE}
+dataset4 <- read_csv('./Datasets/UK retail sales/dataset4.csv')
+dataset4$Date <- seq(as.Date("2015-02-01"), as.Date("2020-10-01"), by="months")
+dataset4 <- dataset4 %>% select(Date, Retail_ex_fuel =  `All Retailing excluding automotive fuel`, Food_stores = `Predominantly food stores`, 
+                                Textile_clothing_footwear = `Textile, clothing and footwear stores`, Household_goods = `Household goods stores`, 
+                                Autofuel = `Automotive fuel`)
+
+# Indexing all columns to start at 100
+startdate = which(dataset4$Date == "2019-01-01")
+for(i in 2:6){
+  dataset4[,i] <- round(dataset4[,i] / pull(dataset4[startdate,i]) * 100,2)
+}
+
+# Converting to format where we can plot lines on one graph
+dataset4 <- pivot_longer(dataset4, 2:6, names_to='RetailType', values_to='Sales')
+
+plot_UKRetail <- ggplot(dataset4, aes(x=Date, y=Sales, col=RetailType)) + geom_point() + geom_line() + xlim(as_date("2019-01-01"), as_date("2020-11-01")) +
+  labs(title='Change in UK Monthly Retail Sales since 2019', caption='Normalised for seasonal change, Retail ex fuel should be in black')
+
+```
+
+
+```{r, echo = FALSE, warning=FALSE, message = FALSE, fig.height=9, fig.width=10}
+plot_grid(plot_UKRetail, plot_UKOnlineRetail, nrow=2)
+```
+
+
+## Google Trends Data
+
+```{r LoadProcess_GoogleTrends, echo = FALSE, warning=FALSE, message = FALSE}
+delivery <- read_csv("./Datasets/GoogleTrends/delivery - commerce.csv")
+flights <- read_csv("./Datasets/GoogleTrends/flights - search term.csv")
+hotel <- read_csv("./Datasets/GoogleTrends/hotel - search term.csv")
+restaurants <- read_csv("./Datasets/GoogleTrends/restaurant - topic.csv")
+takeout <- read_csv("./Datasets/GoogleTrends/take-out - cuisine.csv")
+
+
+GoogleTrends <- left_join(delivery, flights) %>% left_join(hotel) %>% 
+  left_join(restaurants) %>% left_join(takeout)
+
+GoogleTrends$Week <- as_date(dmy(GoogleTrends$Week))
+
+
+
+colnames(GoogleTrends) <- c('Date', 'Delivery', 'Flights', 'Hotel', 'Restaurant', 'Take-out')
+GoogleTrends <- filter(GoogleTrends, Date >= as_date("2019-09-01"))
+
+for(i in 2:6){
+  GoogleTrends[,i] <- round(GoogleTrends[,i] / pull(GoogleTrends[1,i]) * 100,2)
+}
+
+GoogleTrends <- pivot_longer(GoogleTrends, 2:6, values_to = 'Value', names_to = 'Name')
+```
+
+
+```{r Plot_GoogleTrends, echo = FALSE, warning=FALSE, message = FALSE, fig.width=10}
+plot_GoogleTrends <- ggplot(GoogleTrends, aes(x=Date, y=Value, col=Name)) + geom_point() + geom_line()
+plot_GoogleTrends
+```
+
+
+
+
+
+
+
+
+
+
+
+
